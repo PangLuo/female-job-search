@@ -298,6 +298,86 @@ def inject_css():
 
 /* ── Sidebar ── */
 .sidebar-section { font-weight: 600; font-size: 14px; color: #111827; margin-bottom: 8px; }
+
+/* ── Survey hover overlay ── */
+.card-wrap {
+    position: relative;
+    margin-bottom: 16px;
+}
+.card-wrap .card {
+    margin-bottom: 0;
+}
+.survey-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(124, 58, 237, 0.97);
+    border-radius: 12px;
+    color: white;
+    padding: 16px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    overflow-y: auto;
+    z-index: 10;
+}
+.card-wrap:hover .survey-overlay {
+    opacity: 1;
+    pointer-events: auto;
+}
+.survey-overlay h4 {
+    font-size: 13px;
+    font-weight: 700;
+    margin: 0 0 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #EDE9FE;
+}
+.survey-overlay .s-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.12);
+    font-size: 12px;
+}
+.survey-overlay .s-label { color: #DDD6FE; }
+.survey-overlay .s-val {
+    font-weight: 700;
+    font-size: 13px;
+    color: white;
+}
+.survey-overlay .s-bar-bg {
+    flex: 1;
+    height: 4px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    margin: 0 8px;
+}
+.survey-overlay .s-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: #A78BFA;
+}
+.survey-overlay .s-no-data {
+    text-align: center;
+    padding: 20px 0;
+    color: #DDD6FE;
+    font-size: 13px;
+}
+.survey-overlay .s-count {
+    font-size: 11px;
+    color: #C4B5FD;
+    margin-bottom: 10px;
+}
+.survey-overlay .s-comment {
+    font-size: 11px;
+    color: #EDE9FE;
+    font-style: italic;
+    border-top: 1px solid rgba(255,255,255,0.15);
+    padding-top: 8px;
+    margin-top: 6px;
+    line-height: 1.4;
+}
 </style>
 """,
         unsafe_allow_html=True,
@@ -365,8 +445,113 @@ def posted_label(days: int | None) -> str:
     return f"{days} days ago"
 
 
+
+@st.cache_data(ttl=60)
+def load_survey_data() -> dict:
+    """Return {company_lower: [rows]} from survey_data.csv."""
+    path = Path("survey_data.csv")
+    if not path.exists():
+        return {}
+    result: dict = {}
+    try:
+        with open(path, newline="", encoding="utf-8") as f:
+            for row in csv.DictReader(f):
+                key = row.get("company", "").strip().lower()
+                if key:
+                    result.setdefault(key, []).append(row)
+    except Exception:
+        pass
+    return result
+
+
+def _survey_rows_for(company_name: str, survey_map: dict) -> list:
+    """Fuzzy-match company name against survey keys (substring match)."""
+    name_l = company_name.strip().lower()
+    rows = survey_map.get(name_l, [])
+    if not rows:
+        # also try if any key is a substring of the card name or vice-versa
+        for key, keyed_rows in survey_map.items():
+            if key in name_l or name_l in key:
+                rows = keyed_rows
+                break
+    return rows
+
+
+def survey_overlay_html(company_name: str, survey_map: dict) -> str:
+    """Build the purple hover-overlay HTML for survey results."""
+    rows = _survey_rows_for(company_name, survey_map)
+    if not rows:
+        return (
+            '<div class="survey-overlay">'
+            '<h4>📝 Community Survey</h4>'
+            '<div class="s-no-data">No survey responses yet for this company.<br>'
+            'Be the first to share your experience!</div>'
+            '</div>'
+        )
+
+    FIELDS = [
+        ("speaking_up",    "Comfortable speaking up"),
+        ("ideas_heard",    "Ideas heard equally"),
+        ("parental_leave", "Comfortable taking parental leave"),
+        ("promotion",      "Equal promotion opportunities"),
+        ("pay_equity",     "Pay equity across genders"),
+        ("recommend",      "Would recommend to other women"),
+    ]
+    n = len(rows)
+    avgs = {}
+    for field, _ in FIELDS:
+        vals = [float(r[field]) for r in rows if r.get(field) not in (None, "")]
+        avgs[field] = sum(vals) / len(vals) if vals else None
+
+    # Team composition (last row for simplicity)
+    last = rows[-1]
+    team_w     = last.get("team_women_pct", "")
+    co_w       = last.get("company_women_pct", "")
+    lead_w     = last.get("leadership_women_pct", "")
+    comments   = [r["comments"].strip() for r in rows if r.get("comments", "").strip()]
+
+    rows_html = ""
+    for field, label in FIELDS:
+        avg = avgs.get(field)
+        if avg is None:
+            continue
+        pct = (avg - 1) / 4 * 100          # map 1-5 → 0-100%
+        rows_html += (
+            f'<div class="s-row">'
+            f'<span class="s-label">{label}</span>'
+            f'<div class="s-bar-bg"><div class="s-bar-fill" style="width:{pct:.0f}%"></div></div>'
+            f'<span class="s-val">{avg:.1f}/5</span>'
+            f'</div>'
+        )
+
+    comp_html = ""
+    if team_w or co_w or lead_w:
+        comp_html = (
+            f'<div class="s-row" style="margin-top:8px">'
+            f'<span class="s-label">Team % women</span>'
+            f'<span class="s-val">{team_w}%</span></div>'
+            f'<div class="s-row"><span class="s-label">Company % women</span>'
+            f'<span class="s-val">{co_w}%</span></div>'
+            f'<div class="s-row"><span class="s-label">Leadership % women</span>'
+            f'<span class="s-val">{lead_w}%</span></div>'
+        )
+
+    comment_html = ""
+    if comments:
+        snippet = comments[-1][:120] + ("…" if len(comments[-1]) > 120 else "")
+        comment_html = f'<div class="s-comment">“{snippet}”</div>'
+
+    return (
+        '<div class="survey-overlay">'
+        '<h4>📝 Community Survey Results</h4>'
+        f'<div class="s-count">{n} response{"s" if n != 1 else ""} from women in this company</div>'
+        + rows_html + comp_html + comment_html +
+        '</div>'
+    )
+
+
 # ─── Card renderers ───────────────────────────────────────────────────────────
-def render_wgea_card(c: dict):
+def render_wgea_card(c: dict, survey_map: dict | None = None):
     """Company card with real WGEA metrics — richer than AI-generated cards."""
     raw   = c.get("_raw", {})
     emoji = EMOJI_MAP.get(c.get("industry", ""), "🏢")
@@ -377,8 +562,11 @@ def render_wgea_card(c: dict):
     gpg_colour = "#DC2626" if (gpg or 0) > 20 else "#D97706" if (gpg or 0) > 12 else "#16A34A"
     gpg_html   = f'<span style="color:{gpg_colour};font-weight:700">{gpg:.1f}%</span>' if gpg is not None else "—"
 
+    overlay = survey_overlay_html(c.get("name", ""), survey_map) if survey_map is not None else ""
+
     st.markdown(
         f"""
+<div class="card-wrap">
 <div class="card">
   <div class="card-header">
     <div class="company-logo">{emoji}</div>
@@ -417,17 +605,23 @@ def render_wgea_card(c: dict):
     <span>📍 {c.get("location","")}</span>
   </div>
   <div class="tags" style="margin-top:10px">{tags_html}</div>
+</div>
+{overlay}
 </div>""",
         unsafe_allow_html=True,
     )
 
 
-def render_company_card(c: dict):
+def render_company_card(c: dict, survey_map: dict | None = None):
     emoji = EMOJI_MAP.get(c.get("industry", ""), "🏢")
     tags_html = " ".join(tag_html(h) for h in c.get("highlights", [])[:3])
     wgea = f'<span class="wgea-badge">WGEA Data</span>' if c.get("wgea_data") else ""
+
+    overlay = survey_overlay_html(c.get("name", ""), survey_map) if survey_map is not None else ""
+
     st.markdown(
         f"""
+<div class="card-wrap">
 <div class="card">
   <div class="card-header">
     <div class="company-logo">{emoji}</div>
@@ -459,6 +653,8 @@ def render_company_card(c: dict):
     <span>👥 {c.get("employees","")}</span>
   </div>
   <div class="tags" style="margin-top:10px">{tags_html}</div>
+</div>
+{overlay}
 </div>""",
         unsafe_allow_html=True,
     )
@@ -563,6 +759,8 @@ def companies_page(profile: dict):
 
     # ── WGEA real data section ────────────────────────────────────────────────
     wgea_raw = load_wgea_data()
+    survey_map = load_survey_data()
+    
     if wgea_raw:
         # Filter by industry if selected
         wgea_companies = [wgea_to_card(k, v) for k, v in wgea_raw.items()]
@@ -587,7 +785,7 @@ def companies_page(profile: dict):
             cols = st.columns(3)
             for i, company in enumerate(wgea_filtered):
                 with cols[i % 3]:
-                    render_wgea_card(company)
+                    render_wgea_card(company, survey_map)
 
     # ── AI search results ─────────────────────────────────────────────────────
     ai_companies = st.session_state.get("companies", [])
@@ -599,7 +797,7 @@ def companies_page(profile: dict):
         cols = st.columns(3)
         for i, company in enumerate(ai_companies):
             with cols[i % 3]:
-                render_company_card(company)
+                render_company_card(company, survey_map)
 
     # ── Empty state (no WGEA data and no search yet) ──────────────────────────
     if not wgea_raw and not ai_companies:
@@ -800,6 +998,10 @@ def survey_page():
             if write_header:
                 writer.writeheader()
             writer.writerow(row)
+        
+        # Clear the cached survey data so the new entry reflects immediately on the companies page
+        load_survey_data.clear()
+        
         st.success("Thank you! Your response has been saved and will help other women make informed decisions.")
 
 
