@@ -22,6 +22,10 @@ def inject_css():
 <style>
 /* ── Reset & base ── */
 #MainMenu, footer, header { visibility: hidden; }
+[data-testid="collapsedControl"] { visibility: visible; }
+
+/* ── Brand bar layout ── */
+.brand-col { display: flex; align-items: center; }
 .main .block-container {
     padding: 0 2rem 2rem;
     max-width: 1200px;
@@ -701,21 +705,66 @@ def profile_sidebar() -> dict:
 def main():
     inject_css()
 
-    # Brand header
-    st.markdown(
-        """
-<div class="brand-bar">
+    # ── Sidebar visibility state ──────────────────────────────────────────────
+    if "sidebar_open" not in st.session_state:
+        st.session_state.sidebar_open = True
+
+    # Inject CSS to show or hide the sidebar
+    if st.session_state.sidebar_open:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] { display: flex !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] { display: none !important; }
+            .main .block-container { margin-left: 0 !important; max-width: 100% !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ── Brand header (2 columns: brand left, toggle button right) ─────────────
+    col_brand, col_btn = st.columns([8, 2])
+    with col_brand:
+        st.markdown(
+            """
+<div class="brand-bar" style="border-bottom:none; padding-bottom:0; margin-bottom:0">
   <div class="brand-icon">👩‍💼</div>
   <div>
     <div class="brand-name">WomenInTech</div>
     <div class="brand-tagline">Empowering careers</div>
   </div>
-</div>
-""",
+</div>""",
+            unsafe_allow_html=True,
+        )
+    with col_btn:
+        toggle_label = "✕ Close profile" if st.session_state.sidebar_open else "☰ Open profile"
+        st.markdown("<div style='padding-top:18px'>", unsafe_allow_html=True)
+        if st.button(toggle_label, key="sidebar_toggle", use_container_width=True):
+            st.session_state.sidebar_open = not st.session_state.sidebar_open
+            st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown(
+        "<hr style='margin:8px 0 0; border:none; border-top:1px solid #E5E7EB'>",
         unsafe_allow_html=True,
     )
 
-    profile = profile_sidebar()
+    # ── Profile sidebar (only rendered when open) ─────────────────────────────
+    if st.session_state.sidebar_open:
+        profile = profile_sidebar()
+    else:
+        profile = {
+            "skills": "", "location": "", "career_stage": "Mid",
+            "priorities": [], "career_break": False, "break_reason": "",
+        }
 
     tab_co, tab_jobs, tab_mentors, tab_survey = st.tabs(
         ["🏢  Companies", "💼  Jobs", "👩‍🏫  Mentors", "📝  Share Your Experience"]
