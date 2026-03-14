@@ -126,6 +126,12 @@ Prompt the user to provide DEI related details about companies they've worked fo
 
 Collect data for men, women and non-binary people.
 
+---
+
+### 10. Data Collection on Gender Stats for Job Applications
+
+Track data on how many men, women and non-binary people apply for each job. Display the data for users to see.
+
 
 ## Data Sources
 
