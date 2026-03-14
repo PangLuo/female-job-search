@@ -1,25 +1,29 @@
 import anthropic
 import json
 import os
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
-def web_search(query: str, max_results: int = 6) -> list[dict]:
+def web_search(query: str, max_results: int = 2) -> list[dict]:
     try:
         with DDGS() as ddgs:
             results = list(ddgs.text(query, max_results=max_results))
             return [
-                {"title": r.get("title", ""), "url": r.get("href", ""), "snippet": r.get("body", "")}
+                {
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", "")[:200],  # cap snippet length
+                }
                 for r in results
             ]
     except Exception as e:
         return [{"error": str(e)}]
 
 
-def run_agent(system_prompt: str, user_message: str, max_iterations: int = 12) -> str:
+def run_agent(system_prompt: str, user_message: str, max_iterations: int = 6) -> str:
     client = anthropic.Anthropic()
     tools = [
         {
@@ -50,6 +54,10 @@ def run_agent(system_prompt: str, user_message: str, max_iterations: int = 12) -
                 tools=tools,
                 messages=messages,
             )
+        except anthropic.RateLimitError as e:
+            raise RuntimeError(
+                "Rate limit reached (too many tokens per minute). Please wait 30 seconds and try again."
+            ) from e
         except anthropic.BadRequestError as e:
             if "credit balance" in str(e):
                 raise RuntimeError(
@@ -64,7 +72,7 @@ def run_agent(system_prompt: str, user_message: str, max_iterations: int = 12) -
                 if block.type == "tool_use":
                     results = web_search(
                         block.input.get("query", ""),
-                        block.input.get("max_results", 6),
+                        min(block.input.get("max_results", 2), 2),  # cap at 2
                     )
                     tool_results.append(
                         {
