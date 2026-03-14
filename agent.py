@@ -1,8 +1,12 @@
-import anthropic
+import asyncio
 import json
 import os
 from ddgs import DDGS
 from dotenv import load_dotenv
+from google.adk.agents import LlmAgent
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
 
 load_dotenv()
 
@@ -23,72 +27,39 @@ def web_search(query: str, max_results: int = 2) -> list[dict]:
         return [{"error": str(e)}]
 
 
-def run_agent(system_prompt: str, user_message: str, max_iterations: int = 6) -> str:
-    client = anthropic.Anthropic()
-    tools = [
-        {
-            "name": "web_search",
-            "description": (
-                "Search the web for job listings, company DEI data, gender pay gap reports, "
-                "WGEA data, women in leadership statistics, parental leave policies, and salary data."
-            ),
-            "input_schema": {
-                "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"},
-                    "max_results": {"type": "integer", "default": 6},
-                },
-                "required": ["query"],
-            },
-        }
-    ]
+def run_agent(system_prompt: str, user_message: str) -> str:
+    def web_search_tool(query: str) -> str:
+        """Search the web for job listings, company DEI data, WGEA data,
+        women in leadership stats, parental leave policies, pay gap reports."""
+        return json.dumps(web_search(query))
 
-    messages = [{"role": "user", "content": user_message}]
+    async def _run():
+        agent = LlmAgent(
+            name="job_search_agent",
+            model="gemini-2.5-flash",
+            instruction=system_prompt,
+            tools=[web_search_tool],
+        )
 
-    for _ in range(max_iterations):
-        try:
-            response = client.messages.create(
-                model="claude-sonnet-4-6",
-                max_tokens=4096,
-                system=system_prompt,
-                tools=tools,
-                messages=messages,
-            )
-        except anthropic.RateLimitError as e:
-            raise RuntimeError(
-                "Rate limit reached (too many tokens per minute). Please wait 30 seconds and try again."
-            ) from e
-        except anthropic.BadRequestError as e:
-            if "credit balance" in str(e):
-                raise RuntimeError(
-                    "Insufficient Anthropic API credits. Please add credits at console.anthropic.com/settings/billing."
-                ) from e
-            raise
+        session_service = InMemorySessionService()
+        session = await session_service.create_session(app_name="job_search", user_id="user")
+        runner = Runner(agent=agent, app_name="job_search", session_service=session_service)
 
-        if response.stop_reason == "tool_use":
-            messages.append({"role": "assistant", "content": response.content})
-            tool_results = []
-            for block in response.content:
-                if block.type == "tool_use":
-                    results = web_search(
-                        block.input.get("query", ""),
-                        min(block.input.get("max_results", 2), 2),  # cap at 2
-                    )
-                    tool_results.append(
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": json.dumps(results),
-                        }
-                    )
-            messages.append({"role": "user", "content": tool_results})
-        else:
-            for block in response.content:
-                if hasattr(block, "text"):
-                    return block.text
-            break
+        content = types.Content(role="user", parts=[types.Part(text=user_message)])
 
-    return "[]"
+        async for event in runner.run_async(user_id="user", session_id=session.id, new_message=content):
+            if event.is_final_response() and event.content and event.content.parts:
+                return event.content.parts[0].text
+
+        return "[]"
+
+    try:
+        return asyncio.run(_run())
+    except Exception as e:
+        err = str(e)
+        if "quota" in err.lower() or "429" in err:
+            raise RuntimeError("Rate limit reached. Please wait and try again.") from e
+        raise
 
 
 def extract_json(text: str) -> list:

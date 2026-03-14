@@ -884,8 +884,8 @@ def profile_sidebar() -> dict:
             save_profile(profile)
             st.success("Profile saved!")
 
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            st.error("⚠️ ANTHROPIC_API_KEY not set.\nAdd it to a `.env` file to enable AI search.")
+        if not os.getenv("GOOGLE_API_KEY"):
+            st.error("⚠️ GOOGLE_API_KEY not set.\nAdd it to a `.env` file to enable AI search.")
 
     return profile
 
