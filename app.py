@@ -1,11 +1,58 @@
 import streamlit as st
 import os
 import csv
+import json
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# ─── WGEA data ────────────────────────────────────────────────────────────────
+def load_wgea_data() -> dict:
+    path = Path("wgea_data.json")
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text())["companies"]
+    except Exception:
+        return {}
+
+def wgea_to_card(label: str, d: dict) -> dict:
+    """Convert raw WGEA metrics to the company card schema."""
+    gpg        = abs(d.get("avg_total_remuneration_gpg_pct") or 0)
+    women_pct  = d.get("women_pct") or 0
+    upper_q    = d.get("upper_quartile_women_pct") or 0
+    has_policy = d.get("has_equal_remuneration_policy", False)
+    conducted  = d.get("conducted_gpg_analysis", False)
+
+    # 1-5 scores
+    gender_equality  = round(min(5, max(1, women_pct / 20 + (0.5 if has_policy else 0) + (0.5 if conducted else 0))), 1)
+    women_leadership = round(min(5, max(1, upper_q / 12.5)), 1)
+    pay_equity       = round(min(5, max(1, 5 - gpg / 8)), 1)
+    rating           = round((gender_equality + women_leadership + pay_equity) / 3, 1)
+
+    total = d.get("total_employees") or 0
+    highlights = []
+    if women_pct:   highlights.append(f"{women_pct}% women in workforce")
+    if upper_q:     highlights.append(f"{upper_q}% women in upper pay quartile")
+    if gpg:         highlights.append(f"{gpg:.1f}% avg remuneration gender pay gap")
+
+    return {
+        "name":             label,
+        "industry":         d.get("industry", ""),
+        "rating":           rating,
+        "reviews":          max(1, total // 10),
+        "gender_equality":  gender_equality,
+        "women_leadership": women_leadership,
+        "pay_equity":       pay_equity,
+        "location":         d.get("location", "Australia"),
+        "employees":        f"{total:,} employees" if total else "",
+        "description":      f"{women_pct}% women overall · {upper_q}% in upper pay quartile · {gpg:.1f}% gender pay gap",
+        "highlights":       highlights[:3],
+        "wgea_data":        f"WGEA 2024–25 · ABN {d.get('abn', '')}",
+        "_raw":             d,
+    }
 
 # ─── Page config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -315,6 +362,62 @@ def posted_label(days: int | None) -> str:
 
 
 # ─── Card renderers ───────────────────────────────────────────────────────────
+def render_wgea_card(c: dict):
+    """Company card with real WGEA metrics — richer than AI-generated cards."""
+    raw   = c.get("_raw", {})
+    emoji = EMOJI_MAP.get(c.get("industry", ""), "🏢")
+    gpg   = raw.get("avg_total_remuneration_gpg_pct")
+    uq    = raw.get("upper_quartile_women_pct")
+    tags_html = " ".join(tag_html(h) for h in c.get("highlights", [])[:3])
+
+    gpg_colour = "#DC2626" if (gpg or 0) > 20 else "#D97706" if (gpg or 0) > 12 else "#16A34A"
+    gpg_html   = f'<span style="color:{gpg_colour};font-weight:700">{gpg:.1f}%</span>' if gpg is not None else "—"
+
+    st.markdown(
+        f"""
+<div class="card">
+  <div class="card-header">
+    <div class="company-logo">{emoji}</div>
+    <div style="flex:1">
+      <div class="card-title">{c.get("name","")}</div>
+      <div class="card-subtitle">{c.get("industry","")} <span class="wgea-badge">WGEA 2024–25</span></div>
+    </div>
+  </div>
+  <div class="rating-row">
+    <span class="stars">{stars_html(c.get("rating", 0))}</span>
+    <span class="review-count">{c.get("employees","")}</span>
+  </div>
+  <div class="metrics">
+    <div class="metric-row">
+      <span class="metric-label">Women in workforce</span>
+      <span class="metric-value">{raw.get("women_pct","—")}%</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Women in upper pay quartile</span>
+      <span class="metric-value">{uq if uq is not None else "—"}%</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Avg remuneration pay gap</span>
+      <span class="metric-value">{gpg_html}</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Gender Equality score</span>
+      <span class="metric-value">{c.get("gender_equality","—")}/5</span>
+    </div>
+    <div class="metric-row">
+      <span class="metric-label">Pay Equity score</span>
+      <span class="metric-value">{c.get("pay_equity","—")}/5</span>
+    </div>
+  </div>
+  <div class="card-footer">
+    <span>📍 {c.get("location","")}</span>
+  </div>
+  <div class="tags" style="margin-top:10px">{tags_html}</div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+
 def render_company_card(c: dict):
     emoji = EMOJI_MAP.get(c.get("industry", ""), "🏢")
     tags_html = " ".join(tag_html(h) for h in c.get("highlights", [])[:3])
@@ -454,9 +557,48 @@ def companies_page(profile: dict):
             except Exception as e:
                 st.error(f"Search failed: {e}")
 
-    companies = st.session_state.get("companies", [])
+    # ── WGEA real data section ────────────────────────────────────────────────
+    wgea_raw = load_wgea_data()
+    if wgea_raw:
+        # Filter by industry if selected
+        wgea_companies = [wgea_to_card(k, v) for k, v in wgea_raw.items()]
+        if industry != "All Industries":
+            wgea_companies = [c for c in wgea_companies if industry.lower() in c["industry"].lower()]
 
-    if not companies:
+        # Filter by search query against WGEA set
+        if query:
+            q = query.lower()
+            wgea_filtered = [c for c in wgea_companies if q in c["name"].lower() or q in c["industry"].lower()]
+        else:
+            wgea_filtered = wgea_companies
+
+        if wgea_filtered:
+            st.markdown(
+                """<div style="display:flex;align-items:center;gap:10px;margin:16px 0 12px;">
+                    <span class="wgea-badge" style="font-size:13px;padding:4px 10px;">🇦🇺 WGEA Verified Data</span>
+                    <span style="font-size:13px;color:#6B7280;">Real Australian employer data from the Workplace Gender Equality Agency (2024–25)</span>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+            cols = st.columns(3)
+            for i, company in enumerate(wgea_filtered):
+                with cols[i % 3]:
+                    render_wgea_card(company)
+
+    # ── AI search results ─────────────────────────────────────────────────────
+    ai_companies = st.session_state.get("companies", [])
+    if ai_companies:
+        st.markdown(
+            '<div style="margin:24px 0 12px;font-weight:600;color:#111827;font-size:15px;">🔍 AI Search Results</div>',
+            unsafe_allow_html=True,
+        )
+        cols = st.columns(3)
+        for i, company in enumerate(ai_companies):
+            with cols[i % 3]:
+                render_company_card(company)
+
+    # ── Empty state (no WGEA data and no search yet) ──────────────────────────
+    if not wgea_raw and not ai_companies:
         st.markdown(
             """<div class="empty-state">
               <div class="icon">🏢</div>
@@ -464,12 +606,6 @@ def companies_page(profile: dict):
             </div>""",
             unsafe_allow_html=True,
         )
-        return
-
-    cols = st.columns(3)
-    for i, company in enumerate(companies):
-        with cols[i % 3]:
-            render_company_card(company)
 
 
 def jobs_page(profile: dict):
