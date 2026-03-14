@@ -6,7 +6,9 @@
       "Bash(pip install:*)",
       "Bash(pip3 install:*)",
       "Bash(python3:*)",
-      "Bash(.venv/bin/python3:*)"
+      "Bash(.venv/bin/python3:*)",
+      "WebFetch(domain:google.github.io)",
+      "WebFetch(domain:pypi.org)"
     ]
   }
 }

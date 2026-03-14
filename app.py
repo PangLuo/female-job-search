@@ -710,10 +710,10 @@ def mentors_page():
 
     col_search, col_expertise = st.columns([4, 2])
     with col_search:
-        search_q = st.text_input("", placeholder="Search mentors by name, role, or expertise...", key="mentor_query", label_visibility="collapsed")
+        search_q = st.text_input("Search mentors", placeholder="Search mentors by name, role, or expertise...", key="mentor_query", label_visibility="collapsed")
     with col_expertise:
         expertise_filter = st.selectbox(
-            "", ["All Expertise", "Engineering Leadership", "Product Management",
+            "Filter by expertise", ["All Expertise", "Engineering Leadership", "Product Management",
                  "Data Science", "Return-to-work", "Executive Leadership",
                  "Career Transition", "Software Architecture"],
             key="mentor_expertise", label_visibility="collapsed"
@@ -884,8 +884,8 @@ def profile_sidebar() -> dict:
             save_profile(profile)
             st.success("Profile saved!")
 
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            st.error("⚠️ ANTHROPIC_API_KEY not set.\nAdd it to a `.env` file to enable AI search.")
+        if not os.getenv("GOOGLE_API_KEY"):
+            st.error("⚠️ GOOGLE_API_KEY not set.\nAdd it to a `.env` file to enable AI search.")
 
     return profile
 
