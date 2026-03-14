@@ -1,0 +1,12 @@
+[project]
+name = "female-job-search"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "streamlit>=1.32.0",
+    "anthropic>=0.40.0",
+    "duckduckgo-search>=6.0.0",
+    "python-dotenv>=1.0.0",
+]
