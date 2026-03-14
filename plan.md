@@ -16,7 +16,7 @@ A job search tool that goes beyond keyword matching. The user provides a persona
 
 ### 1. User Profile (Input)
 
-Rather than uploading a CV, the user answers a short set of questions:
+Either upload a CV or answer a few questions:
 
 - **Skills & experience** — free text description (e.g. "5 years Python, led small teams, data analysis")
 - **Industry preference** — Tech, Finance, Healthcare, Government, Other
@@ -114,6 +114,24 @@ Results are ranked first by female-friendliness score, then by skills match. Eac
 5. A one-sentence "why this is a good fit for you specifically" tailored to the user's stated priorities
 
 ---
+
+### 9. Data Collection Survey
+
+Prompt the user to provide DEI related details about companies they've worked for in the past to build a collection of data. Ask questions like:
+
+- Did you feel comfortable speaking up in meetings?
+- Did you feel your ideas were heard and valued?
+- Did you feel comfortable taking parental leave?
+- What was the DEI split for the team you were working on? And the wider company?
+
+Collect data for men, women and non-binary people.
+
+---
+
+### 10. Data Collection on Gender Stats for Job Applications
+
+Track data on how many men, women and non-binary people apply for each job. Display the data for users to see.
+
 
 ## Data Sources
 
