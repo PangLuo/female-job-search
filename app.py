@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import csv
+import json
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -22,6 +23,10 @@ def inject_css():
 <style>
 /* ── Reset & base ── */
 #MainMenu, footer, header { visibility: hidden; }
+[data-testid="collapsedControl"] { visibility: visible; }
+
+/* ── Brand bar layout ── */
+.brand-col { display: flex; align-items: center; }
 .main .block-container {
     padding: 0 2rem 2rem;
     max-width: 1200px;
@@ -663,6 +668,53 @@ def survey_page():
         st.success("Thank you! Your response has been saved and will help other women make informed decisions.")
 
 
+# ─── Profile persistence ──────────────────────────────────────────────────────
+PROFILE_PATH = Path("profile.json")
+
+PROFILE_DEFAULTS: dict = {
+    "skills": "",
+    "location": "",
+    "career_stage": "Early",
+    "priorities": [],
+    "career_break": False,
+    "break_reason": "",
+}
+
+# Map profile field names → Streamlit widget session-state keys
+_PROFILE_WIDGET_KEYS: dict = {
+    "skills":       "profile_skills",
+    "location":     "profile_location",
+    "career_stage": "profile_stage",
+    "priorities":   "profile_priorities",
+    "career_break": "profile_break",
+    "break_reason": "profile_break_reason",
+}
+
+def load_profile() -> None:
+    """Seed widget session-state keys from profile.json (runs once per session)."""
+    if st.session_state.get("_profile_loaded"):
+        return
+    saved: dict = PROFILE_DEFAULTS.copy()
+    if PROFILE_PATH.exists():
+        try:
+            saved.update(json.loads(PROFILE_PATH.read_text(encoding="utf-8")))
+        except Exception:
+            pass  # corrupt file — fall back to defaults
+    for field, widget_key in _PROFILE_WIDGET_KEYS.items():
+        if widget_key not in st.session_state:   # don't overwrite live widget state
+            st.session_state[widget_key] = saved.get(field, PROFILE_DEFAULTS[field])
+    st.session_state["_profile_loaded"] = True
+
+def save_profile(profile: dict) -> None:
+    """Persist current profile to profile.json."""
+    try:
+        PROFILE_PATH.write_text(
+            json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+    except Exception:
+        pass  # silently ignore write errors (e.g. read-only filesystem)
+
+
 # ─── Sidebar: user profile ─────────────────────────────────────────────────────
 def profile_sidebar() -> dict:
     with st.sidebar:
@@ -683,38 +735,107 @@ def profile_sidebar() -> dict:
         else:
             break_reason = ""
 
+        profile = {
+            "skills": skills,
+            "location": location,
+            "career_stage": career_stage,
+            "priorities": priorities,
+            "career_break": career_break,
+            "break_reason": break_reason,
+        }
+
         st.markdown("---")
+        if st.button("💾 Save profile", key="save_profile_btn", use_container_width=True):
+            save_profile(profile)
+            st.success("Profile saved!")
+
         if not os.getenv("ANTHROPIC_API_KEY"):
             st.error("⚠️ ANTHROPIC_API_KEY not set.\nAdd it to a `.env` file to enable AI search.")
 
-    return {
-        "skills": skills,
-        "location": location,
-        "career_stage": career_stage,
-        "priorities": priorities,
-        "career_break": career_break,
-        "break_reason": break_reason,
-    }
+    return profile
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────
 def main():
     inject_css()
 
-    # Brand header
-    st.markdown(
-        """
-<div class="brand-bar">
+    # ── Sidebar visibility state ──────────────────────────────────────────────
+    load_profile()  # seed widget defaults from disk (no-op after first run)
+    if "sidebar_open" not in st.session_state:
+        st.session_state.sidebar_open = False
+
+    # Inject CSS to show or hide the sidebar
+    if st.session_state.sidebar_open:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] { display: flex !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            """
+            <style>
+            section[data-testid="stSidebar"] { display: none !important; }
+            .main .block-container { margin-left: 0 !important; max-width: 100% !important; }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    # ── Brand header (2 columns: brand left, toggle button right) ─────────────
+    col_brand, col_btn = st.columns([10, 2])
+    with col_brand:
+        st.markdown(
+            """
+<div class="brand-bar" style="border-bottom:none; padding-bottom:0; margin-bottom:0">
   <div class="brand-icon">👩‍💼</div>
   <div>
     <div class="brand-name">WomenInTech</div>
     <div class="brand-tagline">Empowering careers</div>
   </div>
-</div>
-""",
+</div>""",
+            unsafe_allow_html=True,
+        )
+    with col_btn:
+        toggle_label = "✕ Profile" if st.session_state.sidebar_open else "☰ Profile"
+        st.markdown(
+            """
+            <style>
+            [data-testid="stBaseButton-secondary"][kind="secondary"]:has(+ *) { display:none; }
+            div[data-testid="column"]:last-child .stButton > button {
+                font-size: 12px !important;
+                padding: 4px 10px !important;
+                margin-top: 22px;
+                background: #F5F3FF !important;
+                color: #6D28D9 !important;
+                border: 1px solid #DDD6FE !important;
+                border-radius: 6px !important;
+                font-weight: 600 !important;
+                white-space: nowrap;
+            }
+            div[data-testid="column"]:last-child .stButton > button:hover {
+                background: #EDE9FE !important;
+            }
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+        if st.button(toggle_label, key="sidebar_toggle"):
+            st.session_state.sidebar_open = not st.session_state.sidebar_open
+            st.rerun()
+
+    st.markdown(
+        "<hr style='margin:8px 0 0; border:none; border-top:1px solid #E5E7EB'>",
         unsafe_allow_html=True,
     )
 
+    # ── Profile sidebar (always rendered so widget state is never dropped) ───────
+    # Streamlit purges session_state keys for widgets that aren't rendered.
+    # Calling profile_sidebar() unconditionally keeps the keys alive; CSS
+    # handles the visual show/hide instead.
     profile = profile_sidebar()
 
     tab_co, tab_jobs, tab_mentors, tab_survey = st.tabs(
