@@ -39,4 +39,8 @@ ENV/
 # macOS
 .DS_Store
 
+# WGEA scraper artifacts
+wgea_html/*.html
+wgea_html/_*.png
+.claude/
 profile.json
